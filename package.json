@@ -9,6 +9,17 @@
     "typecheck": "tsc --noEmit",
     "worker": "tsx src/worker/runner.ts",
     "selftest": "tsx scripts/selftest.ts",
+    "test:phase1": "tsx scripts/test-phase1.ts",
+    "test:phase2": "tsx scripts/test-phase2.ts",
+    "test:ollama": "tsx scripts/test-ollama.ts",
+    "test:engineering": "tsx scripts/test-engineering.ts",
+    "test:phase4": "tsx scripts/test-phase4.ts",
+    "test:phase5": "tsx scripts/test-phase5.ts",
+    "test:e2e-phase4-5": "tsx scripts/test-e2e-phase4-5.ts",
+    "test:all-phases": "tsx scripts/test-all-phases.ts",
+    "test:phase6": "tsx scripts/test-phase6.ts",
+    "test:e2e-phase6": "tsx scripts/test-e2e-phase6.ts",
+    "kaira": "tsx scripts/kaira.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

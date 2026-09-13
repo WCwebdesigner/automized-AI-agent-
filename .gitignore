@@ -1,0 +1,13 @@
+node_modules
+package-lock.json
+tsconfig.tsbuildinfo
+workspace/.kaira
+workspace/*.py
+workspace/*.txt
+.next
+dist
+.env
+
+.kaira
+workspace/projects/
+
