@@ -4,6 +4,8 @@
  * Everything Kaira knows and does lives here so execution survives
  * process restarts and can be resumed by any driver (worker or API).
  * Phase 4-5: added observations, evidence, verification, failures, diagnoses, repairs, escalations
+ * Phase 6: projects, requirements, task graphs, checkpoints, reports
+ * Phase 8+9: durable runs, scheduling, waiting, monitoring, research, external actions, connectors, escalations, events, autonomy
  */
 import {
   pgTable,
@@ -187,6 +189,145 @@ export const assumptionStatus = pgEnum("assumption_status", [
   "ESCALATED",
 ]);
 
+// Phase 8+9 enums
+export const durableRunState = pgEnum("durable_run_state", [
+  "CREATED",
+  "QUEUED",
+  "RUNNING",
+  "WAITING",
+  "PAUSED",
+  "RECOVERING",
+  "ESCALATED",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+  "EXPIRED",
+]);
+
+export const waitReason = pgEnum("wait_reason", [
+  "DEPLOYMENT",
+  "EXTERNAL_API",
+  "WEBSITE_CHANGE",
+  "SCHEDULED_TIME",
+  "APPROVAL",
+  "LONG_COMMAND",
+  "DEPENDENCY",
+  "EXTERNAL_EVENT",
+  "RETRY_AFTER",
+  "MONITORING",
+  "RESEARCH",
+  "HEALTH_CHECK",
+]);
+
+export const scheduleType = pgEnum("schedule_type", [
+  "IMMEDIATE",
+  "DELAYED",
+  "SCHEDULED",
+  "RECURRING",
+  "RETRY_AFTER",
+  "WAITING_POLL",
+  "HEALTH_CHECK",
+  "MONITORING",
+]);
+
+export const scheduledJobState = pgEnum("scheduled_job_state", [
+  "PENDING",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
+
+export const monitoringCheckType = pgEnum("monitoring_check_type", [
+  "HTTP_STATUS",
+  "FILE_EXISTS",
+  "FILE_CONTENT",
+  "COMMAND_OUTPUT",
+  "API_RESPONSE",
+  "WEBSITE_CHANGE",
+  "CUSTOM",
+]);
+
+export const monitoringJobState = pgEnum("monitoring_job_state", [
+  "ACTIVE",
+  "COMPLETED",
+  "FAILED",
+  "ESCALATED",
+  "CANCELLED",
+]);
+
+export const researchStage = pgEnum("research_stage", [
+  "CREATED",
+  "DISCOVER",
+  "FETCH",
+  "EXTRACT",
+  "NORMALIZE",
+  "COMPARE",
+  "ANALYZE",
+  "VERIFY",
+  "SYNTHESIZE",
+  "REPORT",
+  "COMPLETED",
+  "FAILED",
+  "ESCALATED",
+]);
+
+export const claimType = pgEnum("claim_type", [
+  "FACT_OBSERVED",
+  "MODEL_INFERENCE",
+  "UNVERIFIED_CLAIM",
+]);
+
+export const sourceType = pgEnum("source_type", [
+  "WEB_PAGE",
+  "API",
+  "RSS",
+  "DOCUMENTATION",
+  "GITHUB",
+  "APPROVED_SERVICE",
+  "MOCK",
+]);
+
+export const connectorPermission = pgEnum("connector_permission", [
+  "READ_ONLY",
+  "REVERSIBLE_WRITE",
+  "IRREVERSIBLE_WRITE",
+  "HIGH_RISK",
+]);
+
+export const escalationReason = pgEnum("escalation_reason", [
+  "INSUFFICIENT_AUTHORITY",
+  "AMBIGUOUS_HIGH_RISK",
+  "MISSING_CREDENTIALS",
+  "DESTRUCTIVE_OPERATION",
+  "UNRESOLVED_FAILURES",
+  "LIMIT_EXCEEDED",
+  "CONTRADICTION",
+  "UNAVAILABLE_DEPENDENCY",
+  "HUMAN_JUDGMENT_REQUIRED",
+  "SECURITY_VIOLATION",
+  "EXTERNAL_SERVICE_FAILURE",
+]);
+
+export const eventType = pgEnum("event_type", [
+  "WEBHOOK",
+  "REPO_EVENT",
+  "DEPLOYMENT_EVENT",
+  "SCHEDULED_EVENT",
+  "FILE_CHANGE",
+  "API_EVENT",
+  "MONITORING_ALERT",
+  "EXTERNAL_EVENT",
+  "MANUAL",
+]);
+
+export const autonomyLevel = pgEnum("autonomy_level", [
+  "SUPERVISED",
+  "ASSISTED",
+  "AUTONOMOUS",
+  "RESTRICTED",
+]);
+
 /* --------------------------------- tables --------------------------------- */
 
 /** A goal given to Kaira by her CEO (Brandon). */
@@ -365,7 +506,7 @@ export const evidence = pgTable(
       .references(() => runs.id, { onDelete: "cascade" }),
     source: text("source").notNull(),
     type: evidenceType("type").notNull(),
-    confidence: integer("confidence").notNull().default(100), // stored as 0-100
+    confidence: integer("confidence").notNull().default(100),
     timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
     data: jsonb("data"),
     filePath: text("file_path"),
@@ -723,7 +864,7 @@ export const assumptions = pgTable(
       .references(() => objectives.id, { onDelete: "cascade" }),
     assumption: text("assumption").notNull(),
     reason: text("reason").notNull(),
-    confidence: integer("confidence").notNull(), // 0-100
+    confidence: integer("confidence").notNull(),
     risk: assumptionRisk("risk").notNull(),
     affectedTasks: text("affected_tasks").array().notNull().default([]),
     requiresApproval: boolean("requires_approval").notNull().default(false),
@@ -848,6 +989,282 @@ export const engineeringReports = pgTable(
   (t) => [index("engineering_reports_project_idx").on(t.projectId)]
 );
 
+/* --------------------------- Phase 8+9 tables --------------------------- */
+
+/** Durable runs — long-running job abstraction */
+export const durableRuns = pgTable(
+  "durable_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: text("run_id").notNull().unique(),
+    objectiveId: uuid("objective_id")
+      .notNull()
+      .references(() => objectives.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    state: durableRunState("state").notNull().default("CREATED"),
+    previousState: durableRunState("previous_state"),
+    currentTaskId: text("current_task_id"),
+    taskGraphId: uuid("task_graph_id"),
+    objective: text("objective").notNull(),
+    startTime: timestamp("start_time", { withTimezone: true }).notNull().defaultNow(),
+    lastActivityTime: timestamp("last_activity_time", { withTimezone: true }).notNull().defaultNow(),
+    nextScheduledAction: timestamp("next_scheduled_action", { withTimezone: true }),
+    checkpointRef: jsonb("checkpoint_ref"),
+    retryInfo: jsonb("retry_info").notNull().default({}),
+    waitingState: jsonb("waiting_state"),
+    externalDependencies: jsonb("external_dependencies").notNull().default([]),
+    failureCount: integer("failure_count").notNull().default(0),
+    failures: jsonb("failures").notNull().default([]),
+    escalationCount: integer("escalation_count").notNull().default(0),
+    escalations: jsonb("escalations").notNull().default([]),
+    verificationState: jsonb("verification_state"),
+    completionState: jsonb("completion_state"),
+    cancellationState: jsonb("cancellation_state"),
+    expirationState: jsonb("expiration_state"),
+    resourceUsage: jsonb("resource_usage").notNull().default({}),
+    autonomyPolicy: autonomyLevel("autonomy_policy").notNull().default("ASSISTED"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("durable_runs_objective_idx").on(t.objectiveId),
+    index("durable_runs_state_idx").on(t.state),
+    index("durable_runs_run_id_idx").on(t.runId),
+  ]
+);
+
+/** Scheduled jobs */
+export const scheduledJobs = pgTable(
+  "scheduled_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: text("job_id").notNull().unique(),
+    runId: text("run_id").notNull(),
+    objectiveId: uuid("objective_id").notNull().references(() => objectives.id, { onDelete: "cascade" }),
+    type: scheduleType("type").notNull(),
+    state: scheduledJobState("state").notNull().default("PENDING"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    intervalMs: integer("interval_ms"),
+    maxExecutions: integer("max_executions"),
+    executionCount: integer("execution_count").notNull().default(0),
+    lastExecutionAt: timestamp("last_execution_at", { withTimezone: true }),
+    nextExecutionAt: timestamp("next_execution_at", { withTimezone: true }),
+    payload: jsonb("payload"),
+    retryPolicy: jsonb("retry_policy"),
+    timeoutMs: integer("timeout_ms").notNull().default(30000),
+    cancellationRequested: boolean("cancellation_requested").notNull().default(false),
+    result: jsonb("result"),
+    error: text("error"),
+    observability: jsonb("observability").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("scheduled_jobs_run_idx").on(t.runId),
+    index("scheduled_jobs_state_idx").on(t.state),
+  ]
+);
+
+/** Monitoring jobs */
+export const monitoringJobs = pgTable(
+  "monitoring_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: text("job_id").notNull().unique(),
+    runId: text("run_id").notNull(),
+    objectiveId: uuid("objective_id").notNull().references(() => objectives.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    what: text("what").notNull(),
+    how: monitoringCheckType("how").notNull(),
+    description: text("description").notNull(),
+    target: text("target").notNull(),
+    pollingIntervalMs: integer("polling_interval_ms").notNull().default(30000),
+    timeoutMs: integer("timeout_ms").notNull().default(300000),
+    acceptableStates: text("acceptable_states").array().notNull().default([]),
+    changeDetection: jsonb("change_detection").notNull().default({}),
+    escalationConditions: jsonb("escalation_conditions").notNull().default({}),
+    completionConditions: jsonb("completion_conditions").notNull().default({}),
+    state: monitoringJobState("state").notNull().default("ACTIVE"),
+    checks: jsonb("checks").notNull().default([]),
+    lastCheckAt: timestamp("last_check_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    result: text("result"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("monitoring_jobs_run_idx").on(t.runId),
+    index("monitoring_jobs_state_idx").on(t.state),
+  ]
+);
+
+/** Research jobs */
+export const researchJobs = pgTable(
+  "research_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    researchId: text("research_id").notNull().unique(),
+    objectiveId: uuid("objective_id").notNull().references(() => objectives.id, { onDelete: "cascade" }),
+    runId: text("run_id"),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    objective: text("objective").notNull(),
+    questions: jsonb("questions").notNull().default([]),
+    constraints: jsonb("constraints").notNull(),
+    stage: researchStage("stage").notNull().default("CREATED"),
+    sources: jsonb("sources").notNull().default([]),
+    fetchedContent: jsonb("fetched_content").notNull().default([]),
+    observations: jsonb("observations").notNull().default([]),
+    claims: jsonb("claims").notNull().default([]),
+    contradictions: jsonb("contradictions").notNull().default([]),
+    verificationState: jsonb("verification_state").notNull().default({}),
+    findings: jsonb("findings").notNull().default({}),
+    metadata: jsonb("metadata").notNull().default({}),
+    confidence: integer("confidence").notNull().default(0),
+    status: text("status").notNull().default("ACTIVE"),
+    escalationReason: text("escalation_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("research_jobs_objective_idx").on(t.objectiveId),
+    index("research_jobs_research_id_idx").on(t.researchId),
+  ]
+);
+
+/** Research sources with provenance */
+export const researchSources = pgTable(
+  "research_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceId: text("source_id").notNull().unique(),
+    researchId: text("research_id").notNull(),
+    url: text("url").notNull(),
+    type: sourceType("type").notNull(),
+    title: text("title"),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true }),
+    statusCode: integer("status_code"),
+    contentType: text("content_type"),
+    contentLength: integer("content_length"),
+    excerpt: text("excerpt"),
+    extractionMethod: text("extraction_method"),
+    metadata: jsonb("metadata"),
+    confidence: integer("confidence").notNull().default(50),
+    verificationStatus: text("verification_status").notNull().default("UNVERIFIED"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("research_sources_research_idx").on(t.researchId),
+    index("research_sources_url_idx").on(t.url),
+  ]
+);
+
+/** External actions */
+export const externalActions = pgTable(
+  "external_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actionId: text("action_id").notNull().unique(),
+    runId: text("run_id").notNull(),
+    objectiveId: uuid("objective_id").notNull().references(() => objectives.id, { onDelete: "cascade" }),
+    connectorName: text("connector_name").notNull(),
+    permission: connectorPermission("permission").notNull(),
+    input: jsonb("input"),
+    output: jsonb("output"),
+    success: boolean("success").notNull(),
+    error: text("error"),
+    executionTimeMs: integer("execution_time_ms").notNull(),
+    riskLevel: text("risk_level").notNull(),
+    verification: jsonb("verification"),
+    authorizedBy: text("authorized_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("external_actions_run_idx").on(t.runId),
+    index("external_actions_connector_idx").on(t.connectorName),
+  ]
+);
+
+/** Structured escalations */
+export const structuredEscalations = pgTable(
+  "structured_escalations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    escalationId: text("escalation_id").notNull().unique(),
+    runId: text("run_id").notNull(),
+    objectiveId: uuid("objective_id").notNull().references(() => objectives.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    researchId: text("research_id"),
+    reason: escalationReason("reason").notNull(),
+    description: text("description").notNull(),
+    objective: text("objective").notNull(),
+    currentState: jsonb("current_state").notNull(),
+    attemptedActions: jsonb("attempted_actions").notNull().default([]),
+    evidence: jsonb("evidence").notNull().default([]),
+    options: jsonb("options").notNull(),
+    recommendedAction: jsonb("recommended_action").notNull(),
+    decisionRequired: jsonb("decision_required").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    resolution: jsonb("resolution"),
+    severity: text("severity").notNull().default("MEDIUM"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("structured_escalations_run_idx").on(t.runId),
+    index("structured_escalations_reason_idx").on(t.reason),
+  ]
+);
+
+/** Events */
+export const events = pgTable(
+  "events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: text("event_id").notNull().unique(),
+    type: eventType("type").notNull(),
+    source: text("source").notNull(),
+    payload: jsonb("payload").notNull(),
+    metadata: jsonb("metadata"),
+    status: text("status").notNull().default("RECEIVED"),
+    validationResult: jsonb("validation_result"),
+    authorizationResult: jsonb("authorization_result"),
+    correlationId: text("correlation_id"),
+    runId: text("run_id"),
+    objectiveId: uuid("objective_id").references(() => objectives.id, { onDelete: "set null" }),
+    result: jsonb("result"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("events_type_idx").on(t.type),
+    index("events_source_idx").on(t.source),
+    index("events_correlation_idx").on(t.correlationId),
+  ]
+);
+
+/** Connector metadata & rate limiting */
+export const connectorMetadata = pgTable(
+  "connector_metadata",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectorName: text("connector_name").notNull().unique(),
+    capability: text("capability").notNull(),
+    permission: connectorPermission("permission").notNull(),
+    riskLevel: text("risk_level").notNull(),
+    sideEffect: text("side_effect").notNull(),
+    rateLimit: jsonb("rate_limit").notNull(),
+    circuitBreaker: jsonb("circuit_breaker").notNull().default({}),
+    totalRequests: integer("total_requests").notNull().default(0),
+    totalFailures: integer("total_failures").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("connector_metadata_name_idx").on(t.connectorName)]
+);
+
 /* ---------------------------------- types --------------------------------- */
 
 export type Objective = typeof objectives.$inferSelect;
@@ -877,3 +1294,12 @@ export type TaskGraph = typeof taskGraphs.$inferSelect;
 export type ProjectTask = typeof projectTasks.$inferSelect;
 export type Checkpoint = typeof checkpoints.$inferSelect;
 export type EngineeringReport = typeof engineeringReports.$inferSelect;
+export type DurableRun = typeof durableRuns.$inferSelect;
+export type ScheduledJob = typeof scheduledJobs.$inferSelect;
+export type MonitoringJob = typeof monitoringJobs.$inferSelect;
+export type ResearchJob = typeof researchJobs.$inferSelect;
+export type ResearchSource = typeof researchSources.$inferSelect;
+export type ExternalAction = typeof externalActions.$inferSelect;
+export type StructuredEscalation = typeof structuredEscalations.$inferSelect;
+export type AgentEvent = typeof events.$inferSelect;
+export type ConnectorMetadata = typeof connectorMetadata.$inferSelect;

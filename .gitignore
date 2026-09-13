@@ -10,4 +10,6 @@ dist
 
 .kaira
 workspace/projects/
+workspace/.kaira-test-*
+workspace/.kaira-e2e-*
 

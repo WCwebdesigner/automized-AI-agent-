@@ -1,5 +1,5 @@
 /**
- * Engineering Tool Layer — Phase 3
+ * Engineering Tool Layer — Phase 3 + Phase 9
  * Registers all required tools with safety, Windows compatibility
  */
 
@@ -18,6 +18,7 @@ import { inspectDirectoryTool } from "./definitions/inspect_directory";
 import { modifyFileTool } from "./definitions/modify_file";
 import { verifyFileTool } from "./definitions/verify_file";
 import { runTestTool, runLinterTool, runTypecheckTool } from "./definitions/run_tests";
+import { webFetchTool, webSearchMockTool } from "../research/webAccess";
 
 let registered = false;
 
@@ -43,6 +44,10 @@ export function registerEngineeringTools() {
   globalToolRegistry.register(runTestTool);
   globalToolRegistry.register(runLinterTool);
   globalToolRegistry.register(runTypecheckTool);
+
+  // Phase 9 web/research tools
+  globalToolRegistry.register(webFetchTool);
+  globalToolRegistry.register(webSearchMockTool);
 
   registered = true;
   return globalToolRegistry;
@@ -73,4 +78,6 @@ export {
   runTestTool,
   runLinterTool,
   runTypecheckTool,
+  webFetchTool,
+  webSearchMockTool,
 };

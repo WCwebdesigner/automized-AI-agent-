@@ -43,6 +43,21 @@ export interface PersistedState {
   projectTasks: Record<string, any>;
   checkpoints: Record<string, any>;
   engineeringReports: Record<string, any>;
+  // Phase 8+9
+  durableRuns: Record<string, any>;
+  scheduledJobs: Record<string, any>;
+  waitingStates: Record<string, any>;
+  monitoringJobs: Record<string, any>;
+  researchJobs: Record<string, any>;
+  researchSources: Record<string, any>;
+  externalActions: Record<string, any>;
+  connectorMetadata: Record<string, any>;
+  rateLimitStates: Record<string, any>;
+  structuredEscalations: Record<string, any>;
+  events: Record<string, any>;
+  eventSubscriptions: Record<string, any>;
+  autonomyPolicies: Record<string, any>;
+  heartbeats: Record<string, any>;
 }
 
 export class StatePersistence {
@@ -65,7 +80,7 @@ export class StatePersistence {
 
   private defaultState(): PersistedState {
     return {
-      version: "3.0.0",
+      version: "4.0.0",
       objectives: {},
       tasks: {},
       agentState: AgentState.IDLE,
@@ -90,16 +105,30 @@ export class StatePersistence {
       projectTasks: {},
       checkpoints: {},
       engineeringReports: {},
+      durableRuns: {},
+      scheduledJobs: {},
+      waitingStates: {},
+      monitoringJobs: {},
+      researchJobs: {},
+      researchSources: {},
+      externalActions: {},
+      connectorMetadata: {},
+      rateLimitStates: {},
+      structuredEscalations: {},
+      events: {},
+      eventSubscriptions: {},
+      autonomyPolicies: {},
+      heartbeats: {},
     };
   }
 
   private migrateIfNeeded(state: any): PersistedState {
-    // Migrate from v1.0.0 or v2.0.0 to v3.0.0
-    if (!state.version || state.version === "1.0.0" || state.version === "2.0.0") {
+    // Migrate from v1.0.0 or v2.0.0 or v3.0.0 to v4.0.0
+    if (!state.version || state.version === "1.0.0" || state.version === "2.0.0" || state.version === "3.0.0") {
       return {
         ...this.defaultState(),
         ...state,
-        version: "3.0.0",
+        version: "4.0.0",
         objectives: state.objectives ?? {},
         tasks: state.tasks ?? {},
         observations: state.observations ?? {},
@@ -122,6 +151,20 @@ export class StatePersistence {
         projectTasks: state.projectTasks ?? {},
         checkpoints: state.checkpoints ?? {},
         engineeringReports: state.engineeringReports ?? {},
+        durableRuns: state.durableRuns ?? {},
+        scheduledJobs: state.scheduledJobs ?? {},
+        waitingStates: state.waitingStates ?? {},
+        monitoringJobs: state.monitoringJobs ?? {},
+        researchJobs: state.researchJobs ?? {},
+        researchSources: state.researchSources ?? {},
+        externalActions: state.externalActions ?? {},
+        connectorMetadata: state.connectorMetadata ?? {},
+        rateLimitStates: state.rateLimitStates ?? {},
+        structuredEscalations: state.structuredEscalations ?? {},
+        events: state.events ?? {},
+        eventSubscriptions: state.eventSubscriptions ?? {},
+        autonomyPolicies: state.autonomyPolicies ?? {},
+        heartbeats: state.heartbeats ?? {},
         lastUpdated: new Date().toISOString(),
       };
     }
@@ -149,6 +192,20 @@ export class StatePersistence {
       projectTasks: state.projectTasks ?? {},
       checkpoints: state.checkpoints ?? {},
       engineeringReports: state.engineeringReports ?? {},
+      durableRuns: state.durableRuns ?? {},
+      scheduledJobs: state.scheduledJobs ?? {},
+      waitingStates: state.waitingStates ?? {},
+      monitoringJobs: state.monitoringJobs ?? {},
+      researchJobs: state.researchJobs ?? {},
+      researchSources: state.researchSources ?? {},
+      externalActions: state.externalActions ?? {},
+      connectorMetadata: state.connectorMetadata ?? {},
+      rateLimitStates: state.rateLimitStates ?? {},
+      structuredEscalations: state.structuredEscalations ?? {},
+      events: state.events ?? {},
+      eventSubscriptions: state.eventSubscriptions ?? {},
+      autonomyPolicies: state.autonomyPolicies ?? {},
+      heartbeats: state.heartbeats ?? {},
     };
   }
 
@@ -512,6 +569,88 @@ export class StatePersistence {
       delete state.objectives[id];
       this.save(state);
     }
+  }
+
+  // Phase 8+9 methods
+  saveDurableRun(run: any): void {
+    const state = this.load();
+    state.durableRuns[run.runId] = run;
+    this.save(state);
+  }
+
+  getDurableRun(id: string): any | null {
+    const state = this.load();
+    return state.durableRuns[id] ?? null;
+  }
+
+  getAllDurableRuns(): any[] {
+    const state = this.load();
+    return Object.values(state.durableRuns);
+  }
+
+  saveScheduledJob(job: any): void {
+    const state = this.load();
+    state.scheduledJobs[job.id] = job;
+    this.save(state);
+  }
+
+  getScheduledJobsByRun(runId: string): any[] {
+    const state = this.load();
+    return Object.values(state.scheduledJobs).filter((j: any) => j.runId === runId);
+  }
+
+  saveMonitoringJob(job: any): void {
+    const state = this.load();
+    state.monitoringJobs[job.id] = job;
+    this.save(state);
+  }
+
+  getMonitoringJobsByRun(runId: string): any[] {
+    const state = this.load();
+    return Object.values(state.monitoringJobs).filter((j: any) => j.runId === runId);
+  }
+
+  saveResearchJob(job: any): void {
+    const state = this.load();
+    state.researchJobs[job.researchId] = job;
+    for (const src of job.sources ?? []) {
+      state.researchSources[src.id] = src;
+    }
+    this.save(state);
+  }
+
+  getResearchJob(id: string): any | null {
+    const state = this.load();
+    return state.researchJobs[id] ?? null;
+  }
+
+  saveExternalAction(action: any): void {
+    const state = this.load();
+    state.externalActions[action.id ?? action.timestamp] = action;
+    this.save(state);
+  }
+
+  saveStructuredEscalation(esc: any): void {
+    const state = this.load();
+    state.structuredEscalations[esc.id] = esc;
+    this.save(state);
+  }
+
+  getStructuredEscalationsByRun(runId: string): any[] {
+    const state = this.load();
+    return Object.values(state.structuredEscalations).filter((e: any) => e.runId === runId);
+  }
+
+  saveEvent(event: any): void {
+    const state = this.load();
+    state.events[event.id] = event;
+    this.save(state);
+  }
+
+  saveAutonomyPolicy(policy: any): void {
+    const state = this.load();
+    state.autonomyPolicies[policy.level ?? "default"] = policy;
+    this.save(state);
   }
 
   clear(): void {

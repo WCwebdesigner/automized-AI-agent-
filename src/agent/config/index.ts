@@ -55,6 +55,50 @@ export interface ProjectConfig {
   enableGitAwareness: boolean;
 }
 
+export interface DurableConfig {
+  maxRuntimeMs: number;
+  maxTaskAttempts: number;
+  maxRepairAttempts: number;
+  maxExternalRequests: number;
+  maxModelCalls: number;
+  maxConcurrentJobs: number;
+  maxShellDurationMs: number;
+  maxDownloadedBytes: number;
+  maxResearchDepth: number;
+  maxConsecutiveFailures: number;
+  stalledThresholdMs: number;
+  overdueThresholdMs: number;
+  checkpointIntervalMs: number;
+}
+
+export interface ResearchConfig {
+  maxSources: number;
+  maxDepth: number;
+  maxRequests: number;
+  maxRuntimeMs: number;
+  maxModelCalls: number;
+  defaultTimeoutMs: number;
+  maxResponseBytes: number;
+  allowedDomains: string[];
+  blockedDomains: string[];
+}
+
+export interface ConnectorConfig {
+  defaultTimeoutMs: number;
+  defaultRateLimitPerMinute: number;
+  circuitBreakerThreshold: number;
+  circuitBreakerOpenMs: number;
+  maxResponseBytes: number;
+  enableWebFetch: boolean;
+  enableMockSources: boolean;
+}
+
+export interface AutonomyConfig {
+  defaultLevel: "SUPERVISED" | "ASSISTED" | "AUTONOMOUS" | "RESTRICTED";
+  requireApprovalForHighRisk: boolean;
+  requireApprovalForIrreversible: boolean;
+}
+
 export interface AgentConfig {
   workspaceRoot: string;
   ollamaBaseUrl: string;
@@ -64,6 +108,10 @@ export interface AgentConfig {
   observation: ObservationConfig;
   context: ContextConfig;
   project: ProjectConfig;
+  durable: DurableConfig;
+  research: ResearchConfig;
+  connectors: ConnectorConfig;
+  autonomy: AutonomyConfig;
   permission: {
     defaultLevel: PermissionLevel;
     allowedLevels: PermissionLevel[];
@@ -146,6 +194,46 @@ export function loadConfig(): AgentConfig {
       checkpointInterval: envInt("KAIRA_CHECKPOINT_INTERVAL", 3),
       maxRetriesPerTask: envInt("KAIRA_MAX_RETRIES_PER_TASK", 3),
       enableGitAwareness: process.env.KAIRA_ENABLE_GIT_AWARENESS !== "false",
+    },
+    durable: {
+      maxRuntimeMs: envInt("KAIRA_DURABLE_MAX_RUNTIME_MS", 600_000),
+      maxTaskAttempts: envInt("KAIRA_DURABLE_MAX_TASK_ATTEMPTS", 30),
+      maxRepairAttempts: envInt("KAIRA_DURABLE_MAX_REPAIR_ATTEMPTS", 10),
+      maxExternalRequests: envInt("KAIRA_DURABLE_MAX_EXTERNAL_REQUESTS", 50),
+      maxModelCalls: envInt("KAIRA_DURABLE_MAX_MODEL_CALLS", 100),
+      maxConcurrentJobs: envInt("KAIRA_DURABLE_MAX_CONCURRENT_JOBS", 5),
+      maxShellDurationMs: envInt("KAIRA_DURABLE_MAX_SHELL_DURATION_MS", 300_000),
+      maxDownloadedBytes: envInt("KAIRA_DURABLE_MAX_DOWNLOADED_BYTES", 50 * 1024 * 1024),
+      maxResearchDepth: envInt("KAIRA_DURABLE_MAX_RESEARCH_DEPTH", 5),
+      maxConsecutiveFailures: envInt("KAIRA_DURABLE_MAX_CONSECUTIVE_FAILURES", 5),
+      stalledThresholdMs: envInt("KAIRA_STALLED_THRESHOLD_MS", 5 * 60 * 1000),
+      overdueThresholdMs: envInt("KAIRA_OVERDUE_THRESHOLD_MS", 30 * 60 * 1000),
+      checkpointIntervalMs: envInt("KAIRA_CHECKPOINT_INTERVAL_MS", 30_000),
+    },
+    research: {
+      maxSources: envInt("KAIRA_RESEARCH_MAX_SOURCES", 10),
+      maxDepth: envInt("KAIRA_RESEARCH_MAX_DEPTH", 3),
+      maxRequests: envInt("KAIRA_RESEARCH_MAX_REQUESTS", 20),
+      maxRuntimeMs: envInt("KAIRA_RESEARCH_MAX_RUNTIME_MS", 120_000),
+      maxModelCalls: envInt("KAIRA_RESEARCH_MAX_MODEL_CALLS", 20),
+      defaultTimeoutMs: envInt("KAIRA_RESEARCH_TIMEOUT_MS", 15_000),
+      maxResponseBytes: envInt("KAIRA_RESEARCH_MAX_RESPONSE_BYTES", 5 * 1024 * 1024),
+      allowedDomains: (process.env.KAIRA_RESEARCH_ALLOWED_DOMAINS ?? "").split(",").filter(Boolean),
+      blockedDomains: (process.env.KAIRA_RESEARCH_BLOCKED_DOMAINS ?? "localhost,127.0.0.1,0.0.0.0").split(",").filter(Boolean),
+    },
+    connectors: {
+      defaultTimeoutMs: envInt("KAIRA_CONNECTOR_TIMEOUT_MS", 15_000),
+      defaultRateLimitPerMinute: envInt("KAIRA_CONNECTOR_RATE_LIMIT", 30),
+      circuitBreakerThreshold: envInt("KAIRA_CONNECTOR_CB_THRESHOLD", 5),
+      circuitBreakerOpenMs: envInt("KAIRA_CONNECTOR_CB_OPEN_MS", 60_000),
+      maxResponseBytes: envInt("KAIRA_CONNECTOR_MAX_BYTES", 5 * 1024 * 1024),
+      enableWebFetch: process.env.KAIRA_ENABLE_WEB_FETCH !== "false",
+      enableMockSources: process.env.KAIRA_ENABLE_MOCK_SOURCES !== "false",
+    },
+    autonomy: {
+      defaultLevel: (process.env.KAIRA_AUTONOMY_LEVEL as any) ?? "ASSISTED",
+      requireApprovalForHighRisk: process.env.KAIRA_REQUIRE_APPROVAL_HIGH_RISK !== "false",
+      requireApprovalForIrreversible: process.env.KAIRA_REQUIRE_APPROVAL_IRREVERSIBLE !== "false",
     },
     permission: {
       defaultLevel: (process.env.KAIRA_PERMISSION_LEVEL as PermissionLevel) ?? PermissionLevel.WORKSPACE_WRITE,
