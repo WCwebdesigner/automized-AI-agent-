@@ -328,6 +328,63 @@ export const autonomyLevel = pgEnum("autonomy_level", [
   "RESTRICTED",
 ]);
 
+// Phase 7 enums
+export const memoryType = pgEnum("memory_type", [
+  "PROJECT_KNOWLEDGE",
+  "TECHNICAL_FACT",
+  "ARCHITECTURE_DECISION",
+  "PROJECT_CONVENTION",
+  "SUCCESSFUL_PATTERN",
+  "FAILURE_PATTERN",
+  "REPAIR_PATTERN",
+  "ENVIRONMENT_KNOWLEDGE",
+  "TOOL_KNOWLEDGE",
+  "RESEARCH_FINDING",
+  "PROCEDURE",
+  "CONSTRAINT",
+  "ASSUMPTION",
+  "LESSON_LEARNED",
+]);
+
+export const memoryScope = pgEnum("memory_scope", [
+  "GLOBAL",
+  "PROJECT",
+  "WORKSPACE",
+  "TASK",
+  "TOOL",
+  "ENVIRONMENT",
+]);
+
+export const memoryValidity = pgEnum("memory_validity", [
+  "CANDIDATE",
+  "VALIDATED",
+  "ACTIVE",
+  "STALE",
+  "SUPERSEDED",
+  "INVALIDATED",
+]);
+
+export const memoryProvenance = pgEnum("memory_provenance", [
+  "USER_PROVIDED",
+  "VERIFIED_OBSERVATION",
+  "VERIFIED_RESEARCH",
+  "SUCCESSFUL_EXECUTION",
+  "VERIFIED_REPAIR",
+  "SYSTEM_CONFIGURATION",
+  "INFERRED",
+]);
+
+export const memoryLifecycleEventType = pgEnum("memory_lifecycle_event_type", [
+  "MEMORY_PROPOSED",
+  "MEMORY_REJECTED",
+  "MEMORY_VALIDATED",
+  "MEMORY_STORED",
+  "MEMORY_RETRIEVED",
+  "MEMORY_USED",
+  "MEMORY_STALE",
+  "MEMORY_SUPERSEDED",
+  "MEMORY_INVALIDATED",
+]);
 /* --------------------------------- tables --------------------------------- */
 
 /** A goal given to Kaira by her CEO (Brandon). */
@@ -1265,6 +1322,112 @@ export const connectorMetadata = pgTable(
   (t) => [index("connector_metadata_name_idx").on(t.connectorName)]
 );
 
+/* --------------------------- Phase 7 tables --------------------------- */
+
+/** Durable knowledge — structured metadata, full-text search, filtering, ranking, scopes, provenance, lifecycle, relationships, optional embeddings */
+export const durableMemories = pgTable(
+  "durable_memories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    memoryId: text("memory_id").notNull().unique(),
+    type: memoryType("type").notNull(),
+    content: text("content").notNull(),
+    summary: text("summary").notNull(),
+    scope: memoryScope("scope").notNull(),
+    projectId: text("project_id"),
+    workspacePath: text("workspace_path"),
+    provenanceSource: memoryProvenance("provenance_source").notNull(),
+    provenanceDescription: text("provenance_description").notNull(),
+    provenanceEvidenceIds: text("provenance_evidence_ids").array().notNull().default([]),
+    provenanceTimestamp: timestamp("provenance_timestamp", { withTimezone: true }).notNull(),
+    provenanceRunId: text("provenance_run_id"),
+    provenanceObjectiveId: text("provenance_objective_id"),
+    provenanceTaskId: text("provenance_task_id"),
+    provenanceResearchUrl: text("provenance_research_url"),
+    provenanceResearchSourceId: text("provenance_research_source_id"),
+    confidence: integer("confidence").notNull(),
+    validity: memoryValidity("validity").notNull().default("CANDIDATE"),
+    tags: text("tags").array().notNull().default([]),
+    relatedTasks: text("related_tasks").array().notNull().default([]),
+    relatedTools: text("related_tools").array().notNull().default([]),
+    relatedFailures: text("related_failures").array().notNull().default([]),
+    relatedRepairs: text("related_repairs").array().notNull().default([]),
+    supersedes: text("supersedes").array().notNull().default([]),
+    supersededBy: text("superseded_by"),
+    relatedMemories: text("related_memories").array().notNull().default([]),
+    metadata: jsonb("metadata"),
+    retrievalCount: integer("retrieval_count").notNull().default(0),
+    useCount: integer("use_count").notNull().default(0),
+    successCount: integer("success_count").notNull().default(0),
+    contradictionCount: integer("contradiction_count").notNull().default(0),
+    ignoredCount: integer("ignored_count").notNull().default(0),
+    incorrectCount: integer("incorrect_count").notNull().default(0),
+    lastRetrievedAt: timestamp("last_retrieved_at", { withTimezone: true }),
+    embedding: jsonb("embedding"),
+    embeddingModel: text("embedding_model"),
+    searchVector: text("search_vector"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("durable_memories_type_idx").on(t.type),
+    index("durable_memories_scope_idx").on(t.scope),
+    index("durable_memories_project_idx").on(t.projectId),
+    index("durable_memories_validity_idx").on(t.validity),
+    index("durable_memories_provenance_idx").on(t.provenanceSource),
+    index("durable_memories_confidence_idx").on(t.confidence),
+    index("durable_memories_memory_id_idx").on(t.memoryId),
+  ]
+);
+
+export const memoryLifecycleEvents = pgTable(
+  "memory_lifecycle_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: text("event_id").notNull().unique(),
+    memoryId: text("memory_id").notNull(),
+    type: memoryLifecycleEventType("type").notNull(),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+    reason: text("reason"),
+    runId: text("run_id"),
+    objectiveId: text("objective_id"),
+    taskId: text("task_id"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("memory_lifecycle_events_memory_idx").on(t.memoryId),
+    index("memory_lifecycle_events_type_idx").on(t.type),
+    index("memory_lifecycle_events_run_idx").on(t.runId),
+  ]
+);
+
+export const memoryContradictions = pgTable(
+  "memory_contradictions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contradictionId: text("contradiction_id").notNull().unique(),
+    memoryAId: text("memory_a_id").notNull(),
+    memoryBId: text("memory_b_id").notNull(),
+    description: text("description").notNull(),
+    type: text("type").notNull(),
+    resolved: boolean("resolved").notNull().default(false),
+    resolution: text("resolution"),
+    activeMemoryId: text("active_memory_id"),
+    supersededMemoryId: text("superseded_memory_id"),
+    scope: memoryScope("scope").notNull(),
+    projectId: text("project_id"),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("memory_contradictions_memory_a_idx").on(t.memoryAId),
+    index("memory_contradictions_memory_b_idx").on(t.memoryBId),
+    index("memory_contradictions_project_idx").on(t.projectId),
+    index("memory_contradictions_resolved_idx").on(t.resolved),
+  ]
+);
 /* ---------------------------------- types --------------------------------- */
 
 export type Objective = typeof objectives.$inferSelect;
@@ -1303,3 +1466,6 @@ export type ExternalAction = typeof externalActions.$inferSelect;
 export type StructuredEscalation = typeof structuredEscalations.$inferSelect;
 export type AgentEvent = typeof events.$inferSelect;
 export type ConnectorMetadata = typeof connectorMetadata.$inferSelect;
+export type DurableMemory = typeof durableMemories.$inferSelect;
+export type MemoryLifecycleEvent = typeof memoryLifecycleEvents.$inferSelect;
+export type MemoryContradiction = typeof memoryContradictions.$inferSelect;

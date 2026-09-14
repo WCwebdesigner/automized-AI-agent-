@@ -99,6 +99,19 @@ export interface AutonomyConfig {
   requireApprovalForIrreversible: boolean;
 }
 
+export interface MemoryConfig {
+  maxMemories: number;
+  maxMemoriesPerObjective: number;
+  maxTokensPerObjective: number;
+  maxCharsPerObjective: number;
+  minConfidence: number;
+  enablePersistence: boolean;
+  persistencePath: string;
+  perScopeLimit: Record<string, number>;
+  includeStale: boolean;
+  stalenessDays: number;
+}
+
 export interface AgentConfig {
   workspaceRoot: string;
   ollamaBaseUrl: string;
@@ -112,6 +125,7 @@ export interface AgentConfig {
   research: ResearchConfig;
   connectors: ConnectorConfig;
   autonomy: AutonomyConfig;
+  memory: MemoryConfig;
   permission: {
     defaultLevel: PermissionLevel;
     allowedLevels: PermissionLevel[];
@@ -234,6 +248,27 @@ export function loadConfig(): AgentConfig {
       defaultLevel: (process.env.KAIRA_AUTONOMY_LEVEL as any) ?? "ASSISTED",
       requireApprovalForHighRisk: process.env.KAIRA_REQUIRE_APPROVAL_HIGH_RISK !== "false",
       requireApprovalForIrreversible: process.env.KAIRA_REQUIRE_APPROVAL_IRREVERSIBLE !== "false",
+    },
+    memory: {
+      maxMemories: envInt("KAIRA_MEMORY_MAX_MEMORIES", 10000),
+      maxMemoriesPerObjective: envInt("KAIRA_MEMORY_MAX_PER_OBJECTIVE", 10),
+      maxTokensPerObjective: envInt("KAIRA_MEMORY_MAX_TOKENS_PER_OBJECTIVE", 4000),
+      maxCharsPerObjective: envInt("KAIRA_MEMORY_MAX_CHARS_PER_OBJECTIVE", 12000),
+      minConfidence: envInt("KAIRA_MEMORY_MIN_CONFIDENCE", 30),
+      enablePersistence: process.env.KAIRA_MEMORY_PERSISTENCE !== "false",
+      persistencePath:
+        process.env.KAIRA_MEMORY_PERSISTENCE_PATH ??
+        path.join(workspaceRoot, ".kaira", "memory.json"),
+      perScopeLimit: {
+        TASK: envInt("KAIRA_MEMORY_PER_SCOPE_TASK", 3),
+        PROJECT: envInt("KAIRA_MEMORY_PER_SCOPE_PROJECT", 5),
+        WORKSPACE: envInt("KAIRA_MEMORY_PER_SCOPE_WORKSPACE", 3),
+        TOOL: envInt("KAIRA_MEMORY_PER_SCOPE_TOOL", 2),
+        ENVIRONMENT: envInt("KAIRA_MEMORY_PER_SCOPE_ENV", 2),
+        GLOBAL: envInt("KAIRA_MEMORY_PER_SCOPE_GLOBAL", 2),
+      },
+      includeStale: process.env.KAIRA_MEMORY_INCLUDE_STALE === "true",
+      stalenessDays: envInt("KAIRA_MEMORY_STALENESS_DAYS", 90),
     },
     permission: {
       defaultLevel: (process.env.KAIRA_PERMISSION_LEVEL as PermissionLevel) ?? PermissionLevel.WORKSPACE_WRITE,

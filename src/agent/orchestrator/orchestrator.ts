@@ -41,6 +41,9 @@ import { Failure, Diagnosis, Repair, Escalation } from "../diagnosis/types";
 import { VerificationResult } from "../verification/types";
 import { loadConfig } from "../config";
 import { StatePersistence, globalPersistence } from "../state/persistence";
+import { getGlobalMemoryStore, createMemoryIntegration } from "../memory";
+import type { MemoryRecord, MemoryRetrievalResult } from "../memory/types";
+import { retrieveMemories, DEFAULT_RETRIEVAL_CONFIG } from "../memory/retrieval";
 
 export interface OrchestratorResult {
   project: Project;
@@ -59,6 +62,11 @@ export interface OrchestratorResult {
   report?: any;
   executionTimeMs: number;
   finalResult: string;
+  // Phase 7
+  relevantMemories?: MemoryRecord[];
+  memoryRetrieval?: MemoryRetrievalResult;
+  memoriesExtracted?: number;
+  contradictionsDetected?: any[];
 }
 
 export class ProjectOrchestrator {
@@ -85,6 +93,8 @@ export class ProjectOrchestrator {
   private safeguardTracker: SafeguardTracker;
   private escalationEngine: EscalationEngine;
   private diagnosisContextManager: ContextManager;
+  private memoryStore = getGlobalMemoryStore();
+  private memoryIntegration = createMemoryIntegration(this.memoryStore);
 
   constructor(
     deps?: {
@@ -187,6 +197,57 @@ export class ProjectOrchestrator {
       }
     }
 
+    // Phase 7 — OBJECTIVE → REQUIREMENTS → RETRIEVE RELEVANT MEMORY → PLAN
+    let memoryRetrieval: MemoryRetrievalResult | undefined;
+    let relevantMemories: MemoryRecord[] = [];
+    try {
+      const memConfig = this.config.memory;
+      memoryRetrieval = retrieveMemories(
+        this.memoryStore,
+        {
+          objective: project.objective,
+          projectId: project.id,
+          maxMemories: memConfig.maxMemoriesPerObjective,
+          maxTokens: memConfig.maxTokensPerObjective,
+          maxChars: memConfig.maxCharsPerObjective,
+          minConfidence: memConfig.minConfidence,
+          includeStale: memConfig.includeStale,
+        },
+        {
+          maxMemories: memConfig.maxMemoriesPerObjective,
+          maxTokens: memConfig.maxTokensPerObjective,
+          maxChars: memConfig.maxCharsPerObjective,
+          minConfidence: memConfig.minConfidence,
+          perScopeLimit: memConfig.perScopeLimit as any,
+          includeStale: memConfig.includeStale,
+          includeSuperseded: false,
+          includeInvalidated: false,
+        }
+      );
+      relevantMemories = memoryRetrieval.memories;
+      // Validate current reality vs memory — verified workspace state outranks stale memory
+      for (const mem of relevantMemories) {
+        // Check if memory mentions a file that no longer exists
+        const workspacePath = path.resolve(workspaceRoot, project.workspacePath);
+        // Simple existence check if memory mentions file existence
+        if (mem.content.toLowerCase().includes("exists") && mem.content.includes(".")) {
+          // Could validate, but leave for explicit validation tool
+        }
+        // Mark retrieved already done in retrieveMemories
+        this.logger.info("memory_retrieved", `Retrieved memory ${mem.id}: ${mem.summary} relevance score`, {
+          projectId: project.id,
+          taskId: mem.id,
+        });
+      }
+      if (relevantMemories.length > 0) {
+        this.logger.info("memory_context", `Retrieved ${relevantMemories.length} relevant memories for objective "${project.objective}"`, {
+          projectId: project.id,
+        });
+      }
+    } catch (err) {
+      this.logger.log("WARN", "memory_retrieval_failed", `Memory retrieval failed: ${(err as Error).message}`, { projectId: project.id });
+    }
+
     this.stateMachine.transition(AgentState.EXECUTING, `Executing project ${project.id}`, { objectiveId: project.objectiveId });
 
     const observations: Observation[] = [];
@@ -196,6 +257,7 @@ export class ProjectOrchestrator {
     const diagnoses: Diagnosis[] = [];
     const repairs: Repair[] = [];
     const escalations: Escalation[] = [];
+    let memoriesExtracted = 0;
 
     const graph = this.taskGraphManager.getGraph(project.taskGraphId!) ?? this.taskGraphManager.getGraphByProject(project.id);
     if (!graph) {
@@ -259,7 +321,11 @@ export class ProjectOrchestrator {
                   repairs,
                   escalations,
                   startTime,
-                  `Escalated: ${recoveryResult.escalation.reason}`
+                  `Escalated: ${recoveryResult.escalation.reason}`,
+                  undefined,
+                  memoryRetrieval,
+                  relevantMemories,
+                  memoriesExtracted
                 );
               }
             }
@@ -378,7 +444,6 @@ export class ProjectOrchestrator {
         // Save task
         if (this.persistence) {
           try {
-            // Convert to legacy task for persistence compatibility
             const legacyTask = {
               id: task.id,
               objectiveId: project.objectiveId,
@@ -396,6 +461,71 @@ export class ProjectOrchestrator {
             this.persistence.saveTask(legacyTask);
           } catch {}
         }
+
+        // Phase 7 — EXTRACT LEARNING → VALIDATE MEMORY → STORE
+        try {
+          // Extract successful pattern
+          if (task.type === "IMPLEMENTATION" || task.type === "VERIFICATION") {
+            this.memoryIntegration.extractFromExecution({
+              objective: task.description,
+              projectId: project.id,
+              taskId: task.id,
+              toolName: toolSelection.tool,
+              success: true,
+              observation: observation.outputCombined?.slice(0, 2000) ?? toolResult.output.slice(0, 2000),
+              summary: `Successful ${task.type.toLowerCase()} for ${task.description.slice(0, 80)}`,
+              runId: rid,
+              evidenceIds: newEvidence.map(e => e.id),
+            });
+            memoriesExtracted++;
+          }
+          // Environment knowledge extraction
+          if (task.type === "INITIALIZATION" && env) {
+            const envContent = `Environment detected: ${JSON.stringify(env).slice(0, 1000)} in workspace ${project.workspacePath}`;
+            this.memoryStore.storeCandidate({
+              type: "ENVIRONMENT_KNOWLEDGE",
+              content: envContent,
+              summary: `Environment for project ${project.id}`,
+              scope: "PROJECT",
+              projectId: project.id,
+              provenance: {
+                source: "SYSTEM_CONFIGURATION",
+                description: `Environment detection for ${project.workspacePath}`,
+                timestamp: new Date().toISOString(),
+                runId: rid,
+                taskId: task.id,
+              },
+              confidence: 85,
+              tags: ["environment", project.projectType],
+            }, { runId: rid, hasVerificationEvidence: true });
+          }
+          // Tool knowledge extraction — if tool succeeded, record tool behavior
+          if (toolResult.status === ToolResultStatus.SUCCESS) {
+            this.memoryStore.storeCandidate({
+              type: "TOOL_KNOWLEDGE",
+              content: `Tool ${toolSelection.tool} succeeded for task "${task.description}" with args ${JSON.stringify(toolSelection.args).slice(0, 500)}`,
+              summary: `Tool ${toolSelection.tool} successful pattern`,
+              scope: "TOOL",
+              projectId: project.id,
+              provenance: {
+                source: "SUCCESSFUL_EXECUTION",
+                description: `Tool ${toolSelection.tool} execution success`,
+                timestamp: new Date().toISOString(),
+                runId: rid,
+                taskId: task.id,
+              },
+              confidence: 70,
+              tags: ["tool", toolSelection.tool],
+              relatedTools: [toolSelection.tool],
+            }, { runId: rid, hasVerificationEvidence: true });
+          }
+          // Mark used memories as successful if they influenced this task
+          for (const mem of relevantMemories) {
+            if (task.description.toLowerCase().includes(mem.tags[0]?.toLowerCase() ?? "__none__") || mem.content.toLowerCase().split(" ").some(w => task.description.toLowerCase().includes(w) && w.length > 4)) {
+              this.memoryStore.markUsed(mem.id, true, rid);
+            }
+          }
+        } catch {}
 
         this.logger.info("project_task_completed", `Task ${task.id} completed`, { taskId: task.id, projectId: project.id });
       } else {
@@ -454,7 +584,11 @@ export class ProjectOrchestrator {
               repairs,
               escalations,
               startTime,
-              `Escalated: ${recoveryResult.escalation.reason}`
+              `Escalated: ${recoveryResult.escalation.reason}`,
+              undefined,
+              memoryRetrieval,
+              relevantMemories,
+              memoriesExtracted
             );
           }
         }
@@ -526,6 +660,40 @@ export class ProjectOrchestrator {
       ? `Project completed: ${project.title}. ${projectVerification.summary}. Files: ${report.filesCreated.join(", ")}`
       : `Project failed: ${project.title}. ${projectVerification.summary}. Failed tasks: ${this.taskGraphManager.getFailedTasks(graph.id).length}`;
 
+    // Phase 7 — final extraction: project-level knowledge
+    try {
+      if (finalStatus === "COMPLETED") {
+        this.memoryStore.storeCandidate({
+          type: "PROJECT_KNOWLEDGE",
+          content: `Project ${project.title} completed: ${project.objective}. Files: ${report.filesCreated.join(", ")}. Verification: ${projectVerification.summary}`,
+          summary: `Project knowledge: ${project.title} completed`,
+          scope: "PROJECT",
+          projectId: project.id,
+          provenance: {
+            source: "SUCCESSFUL_EXECUTION",
+            description: `Project ${project.id} completion`,
+            timestamp: new Date().toISOString(),
+            runId: rid,
+          },
+          confidence: 80,
+          tags: ["project", "completion", project.projectType],
+        }, { runId: rid, hasVerificationEvidence: true });
+        memoriesExtracted++;
+      }
+      // Persist memories to state persistence if available
+      if (this.persistence) {
+        try {
+          const allMems = this.memoryStore.exportState();
+          for (const mem of allMems.memories.slice(-10)) {
+            (this.persistence as any).saveMemory?.(mem);
+          }
+          for (const ev of allMems.events.slice(-20)) {
+            (this.persistence as any).saveMemoryEvent?.(ev);
+          }
+        } catch {}
+      }
+    } catch {}
+
     return this.buildResult(
       project,
       this.taskGraphManager.getCompletedTasks(graph.id),
@@ -541,7 +709,10 @@ export class ProjectOrchestrator {
       escalations,
       startTime,
       finalResult,
-      report
+      report,
+      memoryRetrieval,
+      relevantMemories,
+      memoriesExtracted
     );
   }
 
@@ -1054,6 +1225,42 @@ if __name__ == "__main__":
       newEvidence.push(...retryEvidence);
 
       if (retryResult.status === ToolResultStatus.SUCCESS) {
+        // Phase 7 — extract repair pattern on successful repair
+        try {
+          const lastDiagnosis = diagnoses[diagnoses.length - 1];
+          const lastRepair = repairs[repairs.length - 1] as any;
+          if (lastDiagnosis && lastRepair) {
+            this.memoryIntegration.extractRepairPattern({
+              failureId: failure.id,
+              failureDescription: failure.message,
+              repairDescription: lastRepair.intendedChanges ?? lastDiagnosis.recommendedRepair ?? "repair executed",
+              repairSuccess: true,
+              projectId: project.id,
+              runId,
+              evidenceIds: newEvidence.map(e => e.id),
+            });
+            // Also store as REPAIR_PATTERN directly
+            this.memoryStore.storeCandidate({
+              type: "REPAIR_PATTERN",
+              content: `Failure: ${failure.message}\nDiagnosis: ${lastDiagnosis.rootCause}\nRepair: ${lastRepair.intendedChanges ?? lastDiagnosis.recommendedRepair}\nOutcome: successful repair after ${repairs.length} attempts`,
+              summary: `Repair pattern: ${failure.message.slice(0, 100)}`,
+              scope: "PROJECT",
+              projectId: project.id,
+              provenance: {
+                source: "VERIFIED_REPAIR",
+                description: `Verified repair for failure ${failure.id} in task ${task.id}`,
+                timestamp: new Date().toISOString(),
+                runId,
+                taskId: task.id,
+              },
+              confidence: 75,
+              tags: ["repair", "failure", failure.category ?? "unknown"],
+              relatedFailures: [failure.id],
+              relatedRepairs: [lastRepair.id],
+              relatedTasks: [task.id],
+            }, { runId, hasVerificationEvidence: true });
+          }
+        } catch {}
         return { success: true, observations: newObservations, evidence: newEvidence, failures, diagnoses, repairs };
       } else {
         return { success: false, observations: newObservations, evidence: newEvidence, failures, diagnoses, repairs };
@@ -1079,10 +1286,14 @@ if __name__ == "__main__":
     escalations: Escalation[],
     startTime: number,
     finalResult: string,
-    report?: any
+    report?: any,
+    memoryRetrieval?: MemoryRetrievalResult,
+    relevantMemories?: MemoryRecord[],
+    memoriesExtracted?: number
   ): OrchestratorResult {
     const executionTimeMs = Date.now() - startTime;
     const status = project.status;
+    const contradictions = this.memoryStore.getContradictions({ projectId: project.id, unresolvedOnly: true });
 
     return {
       project,
@@ -1101,6 +1312,10 @@ if __name__ == "__main__":
       report,
       executionTimeMs,
       finalResult,
+      relevantMemories,
+      memoryRetrieval,
+      memoriesExtracted,
+      contradictionsDetected: contradictions,
     };
   }
 

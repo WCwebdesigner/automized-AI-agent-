@@ -21,6 +21,8 @@
     "test:e2e-phase6": "tsx scripts/test-e2e-phase6.ts",
     "test:phase8-9": "tsx scripts/test-phase8-9.ts",
     "test:e2e-phase8-9": "tsx scripts/test-e2e-phase8-9.ts",
+    "test:phase7": "tsx scripts/test-phase7.ts",
+    "test:e2e-phase7": "tsx scripts/test-e2e-phase7.ts",
     "kaira": "tsx scripts/kaira.ts",
     "db:push": "drizzle-kit push"
   },

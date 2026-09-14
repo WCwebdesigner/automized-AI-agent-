@@ -58,6 +58,10 @@ export interface PersistedState {
   eventSubscriptions: Record<string, any>;
   autonomyPolicies: Record<string, any>;
   heartbeats: Record<string, any>;
+  // Phase 7
+  memories: Record<string, any>;
+  memoryEvents: Record<string, any>;
+  memoryContradictions: Record<string, any>;
 }
 
 export class StatePersistence {
@@ -119,6 +123,9 @@ export class StatePersistence {
       eventSubscriptions: {},
       autonomyPolicies: {},
       heartbeats: {},
+      memories: {},
+      memoryEvents: {},
+      memoryContradictions: {},
     };
   }
 
@@ -165,6 +172,9 @@ export class StatePersistence {
         eventSubscriptions: state.eventSubscriptions ?? {},
         autonomyPolicies: state.autonomyPolicies ?? {},
         heartbeats: state.heartbeats ?? {},
+        memories: state.memories ?? {},
+        memoryEvents: state.memoryEvents ?? {},
+        memoryContradictions: state.memoryContradictions ?? {},
         lastUpdated: new Date().toISOString(),
       };
     }
@@ -206,6 +216,9 @@ export class StatePersistence {
       eventSubscriptions: state.eventSubscriptions ?? {},
       autonomyPolicies: state.autonomyPolicies ?? {},
       heartbeats: state.heartbeats ?? {},
+      memories: state.memories ?? {},
+      memoryEvents: state.memoryEvents ?? {},
+      memoryContradictions: state.memoryContradictions ?? {},
     };
   }
 
@@ -651,6 +664,50 @@ export class StatePersistence {
     const state = this.load();
     state.autonomyPolicies[policy.level ?? "default"] = policy;
     this.save(state);
+  }
+
+  // Phase 7 methods
+  saveMemory(memory: any): void {
+    const state = this.load();
+    state.memories[memory.id] = memory;
+    this.save(state);
+  }
+
+  saveMemoryEvent(event: any): void {
+    const state = this.load();
+    state.memoryEvents[event.id] = event;
+    this.save(state);
+  }
+
+  saveMemoryContradiction(contra: any): void {
+    const state = this.load();
+    state.memoryContradictions[contra.id] = contra;
+    this.save(state);
+  }
+
+  getMemory(id: string): any | null {
+    const state = this.load();
+    return state.memories[id] ?? null;
+  }
+
+  getAllMemories(): any[] {
+    const state = this.load();
+    return Object.values(state.memories);
+  }
+
+  getMemoriesByProject(projectId: string): any[] {
+    const state = this.load();
+    return Object.values(state.memories).filter((m: any) => !m.projectId || m.projectId === projectId || m.scope === "GLOBAL");
+  }
+
+  getMemoryEventsByMemory(memoryId: string): any[] {
+    const state = this.load();
+    return Object.values(state.memoryEvents).filter((e: any) => e.memoryId === memoryId);
+  }
+
+  getMemoryContradictionsByProject(projectId: string): any[] {
+    const state = this.load();
+    return Object.values(state.memoryContradictions).filter((c: any) => !c.projectId || c.projectId === projectId);
   }
 
   clear(): void {

@@ -22,6 +22,17 @@ import { webFetchTool, webSearchMockTool } from "../research/webAccess";
 
 let registered = false;
 
+function registerMemoryTools() {
+  try {
+    // dynamic import to avoid circular deps — memory tools self-register on import
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("./memoryPhase7");
+  } catch {
+    // ESM fallback — import will self-register
+    import("./memoryPhase7.js").catch(() => {});
+  }
+}
+
 export function registerEngineeringTools() {
   if (registered) return globalToolRegistry;
   
@@ -48,6 +59,9 @@ export function registerEngineeringTools() {
   // Phase 9 web/research tools
   globalToolRegistry.register(webFetchTool);
   globalToolRegistry.register(webSearchMockTool);
+
+  // Phase 7 memory tools
+  registerMemoryTools();
 
   registered = true;
   return globalToolRegistry;
